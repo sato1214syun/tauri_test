@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Listener, Manager};
+use tauri::{Emitter, Listener, Manager};
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -32,27 +32,6 @@ fn command_with_error(arg: u32) -> Result<String, String> {
     } else {
         Err(format!("odd value {}", arg))
     }
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DownloadStarted<'a> {
-    url: &'a str,
-    download_id: usize,
-    content_length: usize,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DownloadProgress {
-    download_id: usize,
-    chunk_length: usize,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DownloadFinished {
-    download_id: usize,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
