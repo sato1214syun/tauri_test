@@ -30,16 +30,27 @@ function App() {
   }
 
   function my_command() {
-    invoke('my_command', { message: { field_str: 'some message', field_u32: 12 } }).then(message => {
-      setResponse1(message.field_str); setResponse2(message.field_u32);
-    });
+    invoke('my_command', { message: { field_str: 'some message', field_u32: 12 } })
+      .then((message) => {
+        const typedMessage = message as { field_str: string; field_u32: string };
+        setResponse1(typedMessage.field_str);
+        setResponse2(typedMessage.field_u32);
+      });
   }
 
   function comm_with_error() {
     for (let arg of [1, 2]) {
       invoke('command_with_error', { arg })
-        .then(message => { setResponse3(message); })
-        .catch(message => { setResponse3(message); })
+        .then((message: unknown) => {
+          if (typeof message === "string") {
+            setResponse3(message);
+          }
+        })
+        .catch((message: unknown) => {
+          if (typeof message === "string") {
+            setResponse3(message);
+          }
+        });
     }
   }
 
