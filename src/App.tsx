@@ -1,143 +1,80 @@
-import { useState, useEffect } from "react";
-import reactLogo from "./assets/react.svg";
 import { invoke } from "@tauri-apps/api/core";
-import { open } from '@tauri-apps/plugin-dialog';
-import { listen, emit } from '@tauri-apps/api/event';
+// import { emit, listen } from "@tauri-apps/api/event";
+// import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { open, save } from "@tauri-apps/plugin-dialog";
+import { useState } from "react";
 import "./App.css";
 
 function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
-  const [response1, setResponse1] = useState("");
-  const [response2, setResponse2] = useState("");
-  const [response3, setResponse3] = useState("");
-  const [file_info, setFileInfo] = useState("");
-  // const [response4, setResponse4] = useState("");
+	const [csv_path, setCSVPath] = useState("");
+	const [excel_path, setExcelPath] = useState("");
+	const [save_result, setSaveResult] = useState("");
 
-  function open_dialog() {
-    open({ multiple: false, directory: false }).then(files => {
-      if (files && files.length > 0) {
-        setFileInfo(`Selected file: ${files}`);
-      } else {
-        setFileInfo("No file selected");
-      }
-    });
-  }
+	function open_dialog(file_type: string) {
+		open({ multiple: false, directory: false }).then((files) => {
+			if (files && files.length > 0) {
+				if (file_type === "csv") {
+					setCSVPath(`Selected CSV file: ${files}`);
+				} else if (file_type === "excel") {
+					setExcelPath(`Selected Excel file: ${files}`);
+				}
+			} else {
+				if (file_type === "csv") {
+					setCSVPath("No file selected");
+				} else if (file_type === "excel") {
+					setExcelPath("No file selected");
+				}
+			}
+		});
+	}
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
-  }
+	async function save_excel() {
+		const path = await save({
+			filters: [
+				{
+					name: "My Filter",
+					extensions: ["png", "jpeg"],
+				},
+			],
+		});
+		invoke("save_excel", { path }).then((response) => {
+			setSaveResult(response);
+		});
+	}
 
-  function my_command() {
-    invoke('my_command', { message: { field_str: 'some message', field_u32: 12 } })
-      .then((message) => {
-        const typedMessage = message as { field_str: string; field_u32: string };
-        setResponse1(typedMessage.field_str);
-        setResponse2(typedMessage.field_u32);
-      });
-  }
+	return (
+		<main className="container">
+			<h1>体調データ解析アプリ</h1>
+			<div style={{ textAlign: "left" }}>
+				<h2>使用手順</h2>
+				<p>1. Rhythm Careからデータをcsvで保存する(エクスポート)</p>
 
-  function comm_with_error() {
-    for (let arg of [1, 2]) {
-      invoke('command_with_error', { arg })
-        .then((message: unknown) => {
-          if (typeof message === "string") {
-            setResponse3(message);
-          }
-        })
-        .catch((message: unknown) => {
-          if (typeof message === "string") {
-            setResponse3(message);
-          }
-        });
-    }
-  }
+				<div>
+					<p>2. csvファイルをアップロードする</p>
+					<button type="button" onClick={() => open_dialog("csv")}>
+						Upload CSV
+					</button>
+					<p>{csv_path}</p>
+				</div>
 
-  function emitMessage() {
-    emit('front-to-back', "hello from front")
-  }
+				<div>
+					<p>3. 前回のエクセルファイルがあればアップロードする</p>
+					<button type="button" onClick={() => open_dialog("excel")}>
+						Upload Excel
+					</button>
+					<p>{excel_path}</p>
+				</div>
 
-  useEffect(
-    () => {
-      let unlisten: any;
-      async function f() {
-        unlisten = await listen(
-          'back-to-front',
-          (event) => { console.log(`back-to-front ${event.payload} ${new Date()}`) }
-        );
-      }
-      f();
-
-      return () => {
-        if (unlisten) {
-          unlisten();
-        }
-      }
-    },
-    []
-  )
-
-  return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vitejs.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://reactjs.org" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          my_command();
-        }}
-      >
-        <button type="submit">コマンド実行</button>
-      </form>
-      <p>{response1}</p>
-      <p>{response2}</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          comm_with_error();
-        }}
-      >
-        <button type="submit">エラーコマンド実行</button>
-      </form>
-      <p>{response3}</p>
-      <button onClick={open_dialog}>Open Dialog</button>
-      <p>{file_info}</p>
-      <button onClick={emitMessage}>emit message on terminal</button>
-    </main>
-  );
+				<div>
+					<p>4. 解析結果(エクセル)を保存する</p>
+					<button type="button" onClick={() => save_excel()}>
+						Save Excel
+					</button>
+					<p>{save_result}</p>
+				</div>
+			</div>
+		</main>
+	);
 }
 
 export default App;
