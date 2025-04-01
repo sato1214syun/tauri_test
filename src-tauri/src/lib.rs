@@ -92,17 +92,6 @@ impl ConditionWorkbook {
         Ok(())
     }
 
-    // # 曜日と土日の判定列を追加
-    // weekday_mapping = dict(zip(range(1, 8), "月火水木金土日", strict=False))
-    // holiday_mapping = {x: 5 if x in [6, 7] else 0 for x in range(1, 8)}
-    // return yearly_df.with_columns(
-    //     pl.col("日付")
-    //     .dt.weekday()
-    //     .replace_strict(weekday_mapping, return_dtype=pl.String)
-    //     .alias("曜日"),
-    //     pl.col("日付").dt.weekday().replace(holiday_mapping).alias("土日判定"),
-    // )
-
     fn _write_yearly_agg_data(&mut self, yearly_ldf: &LazyFrame, worksheet: &mut Worksheet) -> Result<()> {
         let mut agg_ldf = self._prepare_agg_frame(yearly_ldf);
 
@@ -111,15 +100,13 @@ impl ConditionWorkbook {
             .map(|num| format!("{}月", num))
             .collect::<Vec<_>>();
         agg_ldf = agg_ldf.fill_null(0);
-        let position = (0, 0);
-        let include_header = true;
-        self.writer.write_dataframe_to_worksheet(&agg_ldf.collect()?, worksheet, 0, 0);
+        self.writer.write_dataframe_to_worksheet(&agg_ldf.collect()?, worksheet, 0, 6);
 
         // Write a conditional format over a range.
         let annual_data_format = ConditionalFormatDataBar::new().set_fill_color(Color::Orange);
         let monthly_data_format = ConditionalFormatDataBar::new().set_fill_color(Color::Green);
-        worksheet.add_conditional_format(0, 0, 11, 10, &annual_data_format)?;
-        worksheet.add_conditional_format(0, 0, 11, 10, &monthly_data_format)?;
+        worksheet.add_conditional_format(1, 8, 6, 8, &annual_data_format)?;
+        worksheet.add_conditional_format(1, 9, 6, 20, &monthly_data_format)?;
         Ok(())
     }
 
@@ -388,6 +375,17 @@ fn prepare_yearly_df(ldf: &LazyFrame, year: i32) -> LazyFrame {
         col("日付").dt().weekday().alias("曜日"),
         col("日付").dt().weekday().alias("土日判定"),
     ])
+
+    // # 曜日と土日の判定列を追加
+    // weekday_mapping = dict(zip(range(1, 8), "月火水木金土日", strict=False))
+    // holiday_mapping = {x: 5 if x in [6, 7] else 0 for x in range(1, 8)}
+    // return yearly_df.with_columns(
+    //     pl.col("日付")
+    //     .dt.weekday()
+    //     .replace_strict(weekday_mapping, return_dtype=pl.String)
+    //     .alias("曜日"),
+    //     pl.col("日付").dt.weekday().replace(holiday_mapping).alias("土日判定"),
+    // )
 }
 
 #[tauri::command]
