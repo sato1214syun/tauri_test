@@ -6,7 +6,7 @@ use chrono::NaiveDate;
 use polars::prelude::*;
 use polars_excel_writer::PolarsXlsxWriter;
 use rust_xlsxwriter::{
-    chart::{Chart, ChartType}, worksheet::Worksheet, ExcelDateTime, Format, Workbook
+    chart::{Chart, ChartType}, conditional_format::{ConditionalFormat, ConditionalFormatCell, ConditionalFormatCellRule, ConditionalFormatDataBar}, worksheet::Worksheet, Color, ExcelDateTime, Format, Workbook
 };
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Listener, Manager};
@@ -114,29 +114,12 @@ impl ConditionWorkbook {
         let position = (0, 0);
         let include_header = true;
         self.writer.write_dataframe_to_worksheet(&agg_ldf.collect()?, worksheet, 0, 0);
-        worksheet.add_conditional_format(first_row, first_col, last_row, last_col, conditional_format)
 
-        // agg_df.write_excel(
-        //     self,
-        //     sheet_name,
-        //     position=position,
-        //     include_header=include_header,
-        //     table_style="Table Style Light 15",
-        //     autofilter=False,
-        //     column_widths={"調子": 23, "体調": 23},
-        //     conditional_formats={
-        //         "年間": {
-        //             "type": "data_bar",
-        //             "bar_color": "orange",
-        //             "data_bar_2010": True,
-        //         },
-        //         months: {
-        //             "type": "data_bar",
-        //             "bar_color": "green",
-        //             "data_bar_2010": True,
-        //         },
-        //     },
-        // )
+        // Write a conditional format over a range.
+        let annual_data_format = ConditionalFormatDataBar::new().set_fill_color(Color::Orange);
+        let monthly_data_format = ConditionalFormatDataBar::new().set_fill_color(Color::Green);
+        worksheet.add_conditional_format(0, 0, 11, 10, &annual_data_format)?;
+        worksheet.add_conditional_format(0, 0, 11, 10, &monthly_data_format)?;
         Ok(())
     }
 
