@@ -6,7 +6,13 @@ use chrono::NaiveDate;
 use polars::prelude::*;
 use polars_excel_writer::PolarsXlsxWriter;
 use rust_xlsxwriter::{
-    chart::{Chart, ChartType}, conditional_format::{ConditionalFormat, ConditionalFormatCell, ConditionalFormatCellRule, ConditionalFormatDataBar}, worksheet::Worksheet, Color, ExcelDateTime, Format, Workbook
+    chart::{Chart, ChartType},
+    conditional_format::{
+        ConditionalFormat, ConditionalFormatCell, ConditionalFormatCellRule,
+        ConditionalFormatDataBar,
+    },
+    worksheet::Worksheet,
+    Color, ExcelDateTime, Format, Workbook,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Listener, Manager};
@@ -42,6 +48,7 @@ impl ConditionWorkbook {
 
     fn _write_raw_data(&mut self, ldf: &LazyFrame, sheet_name: &str) -> Result<()> {
         let worksheet = self.workbook.add_worksheet().set_name(sheet_name)?;
+
         self.writer
             .write_dataframe_to_worksheet(&ldf.clone().collect()?, worksheet, 0, 0)?;
         Ok(())
@@ -49,126 +56,68 @@ impl ConditionWorkbook {
 
     fn _write_yearly_data(&mut self, ldf: &LazyFrame) -> Result<()> {
         // # 年間の体調集計データの比較シートを作成
-        let worksheet_comp = self.workbook.add_worksheet().set_name("年毎体調比較")?;
-        let comparison_data_position = (0, 0);
+        let worksheet_comp = self.workbook.add_worksheet().set_name("年間体調比較")?;
+
+        let mut row = 0;
+        let col = 0;
         // Create a new Excel writer.
-        for yearly_data in extract_yearly_df_vec(ldf) {
+        for yearly_data in extract_yearly_frame_vec(ldf) {
             let sheet_name = yearly_data.year.to_string();
-            let worksheet = self.workbook.add_worksheet().set_name(&sheet_name)?;
-            // yearly_data.dfを整形して書き込み
-            let yearly_ldf = prepare_yearly_df(&yearly_data.ldf, yearly_data.year);
+            let worksheet = &mut Worksheet::new();
+            worksheet.set_name(&sheet_name)?;
+            // この年のシートにデータを書き込み
+            let yearly_ldf = prepare_yearly_frame(&yearly_data.ldf, yearly_data.year);
+            let yearly_df = yearly_ldf.clone().collect()?;
             self.writer
-                .write_dataframe_to_worksheet(&yearly_ldf.clone().collect()?, worksheet, 0, 0)?;
+                .write_dataframe_to_worksheet(&yearly_df, worksheet, 0, 0);
 
-            // # 年毎の体調の集計データを書き込み
-            self._write_yearly_agg_data(&yearly_ldf, worksheet);
-            // # 年毎の体調の推移のグラフを挿入
+            let yearly_agg_df = prepare_agg_frame(&yearly_ldf).collect()?;
+            self.writer
+                .write_dataframe_to_worksheet(&yearly_agg_df, worksheet, 0, 6);
+            // 集計表に書式を設定
+            let annual_data_format = ConditionalFormatDataBar::new().set_fill_color(Color::Orange);
+            let monthly_data_format = ConditionalFormatDataBar::new().set_fill_color(Color::Green);
+            worksheet.add_conditional_format(1, 8, 6, 8, &annual_data_format)?;
+            worksheet.add_conditional_format(1, 9, 6, 20, &monthly_data_format)?;
 
-            let mut chart = Chart::new(ChartType::Line);
-            chart.add_series();
-            // .set_values((sheet_name, 0, 0, 1, 0));
-            worksheet.insert_chart(0, 2, &chart)?;
+            // 年毎体調比較シートに集計データを書き込み
+            worksheet_comp.write_string(row, col, &sheet_name)?;
+            row += 1;
+            self.writer
+                .write_dataframe_to_worksheet(&yearly_df, worksheet_comp, row, col)?;
+            row += yearly_df.height() as u32;
 
-            // # データを書き込み
-            // self._write_frame(yearly_df, worksheet.name)
-            // # この年の集計データを書込
-            // self._write_yearly_agg_data(yearly_df, worksheet.name, position="G1")
-            // # 年毎の体調の推移の表を書き込み
-            // worksheet_comp.write(*comparison_data_position, yearly_date.year)
-            // comparison_data_position = (
-            //     comparison_data_position[0] + 1,
-            //     comparison_data_position[1],
-            // )
-            // self._write_yearly_agg_data(
-            //     yearly_df, worksheet_comp.name, position=comparison_data_position
-            // )
-            // comparison_data_position = (
-            //     comparison_data_position[0] + 7,
-            //     comparison_data_position[1],
-            // )
-            // # 月毎の体調の推移のグラフを挿入
-            // self._insert_monthly_trend_chart(yearly_df, worksheet.name)
+            // この年のシートに月毎の体調推移グラフを挿入
+            self._insert_monthly_trend_chart(worksheet, &yearly_ldf)?;
         }
         Ok(())
     }
 
-    fn _write_yearly_agg_data(&mut self, yearly_ldf: &LazyFrame, worksheet: &mut Worksheet) -> Result<()> {
-        let mut agg_ldf = self._prepare_agg_frame(yearly_ldf);
+    fn _insert_monthly_trend_chart(&self, worksheet: &mut Worksheet, yearly_ldf: &LazyFrame) -> Result<()> {
+        // 体調の推移グラフ挿入
 
-        // # 体調の集計表を書き込んでを条件付き書式(データバー)を追加
-        let months = (1..=12)
-            .map(|num| format!("{}月", num))
-            .collect::<Vec<_>>();
-        agg_ldf = agg_ldf.fill_null(0);
-        self.writer.write_dataframe_to_worksheet(&agg_ldf.collect()?, worksheet, 0, 6);
+        let insert_matrix = (6, 2); // 6行2列に並べる
+        let insert_row = 8; // F8セルから挿入
+        let insert_col = 5;
+        let per_chart_offset_row  = 8; // グラフの配置間隔がセルで何個分か
+        let per_chart_offset_col = 11;
+        let yearly_ldf_wt_idx = yearly_ldf.clone().with_row_index("cell_row", Some(1));
 
-        // Write a conditional format over a range.
-        let annual_data_format = ConditionalFormatDataBar::new().set_fill_color(Color::Orange);
-        let monthly_data_format = ConditionalFormatDataBar::new().set_fill_color(Color::Green);
-        worksheet.add_conditional_format(1, 8, 6, 8, &annual_data_format)?;
-        worksheet.add_conditional_format(1, 9, 6, 20, &monthly_data_format)?;
-        Ok(())
-    }
-
-    fn _prepare_agg_frame(&self, yearly_ldf: &LazyFrame) -> LazyFrame {
-        // # 年間の体調の集計dfを作成
-        let mut agg_ldf = DataFrame::new(vec![
-            Column::new("調子".into(), vec!["↑", "↗", "→", "↘", "↓", "⇓"]),
-            Column::new("体調".into(), vec![5, 4, 3, 2, 1, 0]),
-        ])
-        .unwrap()
-        .lazy();
-
-        agg_ldf = agg_ldf.left_join(
-            yearly_ldf
-                .clone()
-                .group_by([col("体調")])
-                .agg([col("年間").count()])
-                .cast(
-                    {
-                        col("年間");
-                        {
-                            let mut map = PlHashMap::new();
-                            map.insert("年間", DataType::Int32);
-                            map
-                        }
-                    },
-                    true,
-                ),
-            col("体調"),
-            col("体調"),
-        );
-
-        // 月毎の集計を追加
-        for monthly_data in extract_monthly_df_vec(yearly_ldf) {
+        for (i, monthly_data) in extract_monthly_frame_vec(yearly_ldf).iter().enumerate() {
             let jp_month_str = format!("{}月", monthly_data.month);
-            // 集計表に月毎の体調の集計を追加
-            let temp_agg_ldf = monthly_data
-                .ldf
-                .group_by([col("体調")])
-                .agg([col("体調").count().alias(&jp_month_str)])
-                .cast(
-                    {
-                        col(&jp_month_str);
-                        {
-                            let mut map = PlHashMap::new();
-                            map.insert(jp_month_str.as_str(), DataType::Int32);
-                            map
-                        }
-                    },
-                    true,
-                );
-            agg_ldf = agg_ldf.left_join(temp_agg_ldf, col("体調"), col("体調"));
-        }
-        agg_ldf
-    }
 
-    fn _insert_monthly_trend_chart(&self) -> Result<()> {
-        // """体調の推移グラフ挿入."""
-        // insert_matrix = (6, 2)  # 6行2列にグラフを並べる
-        // insert_cell = (8, 5)  # F8セルから挿入
-        // per_chart_offset = (8, 11)  # グラフの配置間隔がセルで何個分か
-        // yearly_df_wt_idx = yearly_df.with_row_index("cell_row", 1)
+            // 月毎の体調トレンドのグラフ作成
+            let start_row = monthly_data
+                .ldf
+                .clone()
+                .collect()?
+                .to
+
+            let row = insert_row + (i / insert_matrix.1) * per_chart_offset_row;
+            let col = insert_col + (i % insert_matrix.1) * per_chart_offset_col;
+            worksheet.write_string(row, col, &jp_month_str)?;
+        }
+
         // for i, (monthly_date, monthly_df) in enumerate(
         //     self._iter_yearly_data(yearly_df_wt_idx, "1mo"),
         // ):
@@ -287,7 +236,7 @@ impl ConditionWorkbook {
     }
 }
 
-fn extract_yearly_df_vec(ldf: &LazyFrame) -> Vec<YearlyData> {
+fn extract_yearly_frame_vec(ldf: &LazyFrame) -> Vec<YearlyData> {
     let df_with_year = ldf
         .clone()
         .with_column(col("日付").dt().year().cast(DataType::Int32).alias("year"));
@@ -317,7 +266,7 @@ fn extract_yearly_df_vec(ldf: &LazyFrame) -> Vec<YearlyData> {
     yearly_data
 }
 
-fn extract_monthly_df_vec(ldf: &LazyFrame) -> Vec<MonthlyData> {
+fn extract_monthly_frame_vec(ldf: &LazyFrame) -> Vec<MonthlyData> {
     let df_with_month = ldf.clone().with_column(
         col("日付")
             .dt()
@@ -351,7 +300,7 @@ fn extract_monthly_df_vec(ldf: &LazyFrame) -> Vec<MonthlyData> {
     monthly_data
 }
 
-fn prepare_yearly_df(ldf: &LazyFrame, year: i32) -> LazyFrame {
+fn prepare_yearly_frame(ldf: &LazyFrame, year: i32) -> LazyFrame {
     // 1年分の日付列を準備
     let start = NaiveDate::from_ymd_opt(year, 1, 1).unwrap().into();
     let end = NaiveDate::from_ymd_opt(year, 12, 31).unwrap().into();
@@ -371,21 +320,82 @@ fn prepare_yearly_df(ldf: &LazyFrame, year: i32) -> LazyFrame {
 
     yearly_ldf = yearly_ldf.left_join(ldf.clone(), col("日付"), col("日付"));
     // 曜日を追加
+    let weekdays_int = lit(vec![1, 2, 3, 4, 5, 6, 7]);
+    let weekdays_str = lit(Series::new(
+        "weekdays".into(),
+        &["月", "火", "水", "木", "金", "土", "日"],
+    ));
+    let holidays_int = lit(vec![0, 0, 0, 0, 0, 5, 5]);
     yearly_ldf.with_columns(vec![
-        col("日付").dt().weekday().alias("曜日"),
-        col("日付").dt().weekday().alias("土日判定"),
+        col("日付")
+            .dt()
+            .weekday()
+            .replace_strict(
+                weekdays_int.clone(),
+                weekdays_str,
+                None,
+                Some(DataType::String),
+            )
+            .alias("曜日"),
+        col("日付")
+            .dt()
+            .weekday()
+            .replace_strict(weekdays_int, holidays_int, None, Some(DataType::Int32))
+            .alias("土日判定"),
     ])
+}
 
-    // # 曜日と土日の判定列を追加
-    // weekday_mapping = dict(zip(range(1, 8), "月火水木金土日", strict=False))
-    // holiday_mapping = {x: 5 if x in [6, 7] else 0 for x in range(1, 8)}
-    // return yearly_df.with_columns(
-    //     pl.col("日付")
-    //     .dt.weekday()
-    //     .replace_strict(weekday_mapping, return_dtype=pl.String)
-    //     .alias("曜日"),
-    //     pl.col("日付").dt.weekday().replace(holiday_mapping).alias("土日判定"),
-    // )
+fn prepare_agg_frame(yearly_ldf: &LazyFrame) -> LazyFrame {
+    // # 年間の体調の集計dfを作成
+    let mut agg_ldf = DataFrame::new(vec![
+        Column::new("調子".into(), vec!["↑", "↗", "→", "↘", "↓", "⇓"]),
+        Column::new("体調".into(), vec![5, 4, 3, 2, 1, 0]),
+    ])
+    .unwrap()
+    .lazy();
+
+    agg_ldf = agg_ldf.left_join(
+        yearly_ldf
+            .clone()
+            .group_by([col("体調")])
+            .agg([col("年間").count()])
+            .cast(
+                {
+                    col("年間");
+                    {
+                        let mut map = PlHashMap::new();
+                        map.insert("年間", DataType::Int32);
+                        map
+                    }
+                },
+                true,
+            ),
+        col("体調"),
+        col("体調"),
+    );
+
+    // 月毎の集計を追加
+    for monthly_data in extract_monthly_frame_vec(yearly_ldf) {
+        let jp_month_str = format!("{}月", monthly_data.month);
+        // 集計表に月毎の体調の集計を追加
+        let temp_agg_ldf = monthly_data
+            .ldf
+            .group_by([col("体調")])
+            .agg([col("体調").count().alias(&jp_month_str)])
+            .cast(
+                {
+                    col(&jp_month_str);
+                    {
+                        let mut map = PlHashMap::new();
+                        map.insert(jp_month_str.as_str(), DataType::Int32);
+                        map
+                    }
+                },
+                true,
+            );
+        agg_ldf = agg_ldf.left_join(temp_agg_ldf, col("体調"), col("体調"));
+    }
+    agg_ldf.fill_null(lit(0))
 }
 
 #[tauri::command]
@@ -493,7 +503,7 @@ pub fn run() {
 mod tests {
     use super::*;
     use chrono::NaiveDate;
-    use rust_xlsxwriter::*;
+    // use rust_xlsxwriter::*;
     use std::fs::File;
     use std::io::{BufWriter, Write};
     use tempfile::tempdir;
