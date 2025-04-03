@@ -6,16 +6,16 @@ use chrono::NaiveDate;
 use polars::prelude::*;
 use polars_excel_writer::PolarsXlsxWriter;
 use rust_xlsxwriter::{
-    chart::{Chart, ChartType},
-    conditional_format::{
-        ConditionalFormat, ConditionalFormatCell, ConditionalFormatCellRule,
-        ConditionalFormatDataBar,
+    chart::{
+        Chart, ChartFont, ChartFormat, ChartLayout, ChartLine, ChartMarker, ChartMarkerType,
+        ChartSolidFill,
     },
+    conditional_format::ConditionalFormatDataBar,
     worksheet::Worksheet,
-    Color, ExcelDateTime, Format, Workbook,
+    Color, Workbook,
 };
-use serde::{Deserialize, Serialize};
-use tauri::{Emitter, Listener, Manager};
+// use serde::{Deserialize, Serialize};
+// use tauri::{Emitter, Listener, Manager};
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
 struct YearlyData {
@@ -93,145 +93,126 @@ impl ConditionWorkbook {
         Ok(())
     }
 
-    fn _insert_monthly_trend_chart(&self, worksheet: &mut Worksheet, yearly_ldf: &LazyFrame) -> Result<()> {
+    fn _insert_monthly_trend_chart(
+        &self,
+        worksheet: &mut Worksheet,
+        yearly_ldf: &LazyFrame,
+    ) -> Result<()> {
         // 体調の推移グラフ挿入
 
         let insert_matrix = (6, 2); // 6行2列に並べる
-        let insert_row = 8; // F8セルから挿入
-        let insert_col = 5;
-        let per_chart_offset_row  = 8; // グラフの配置間隔がセルで何個分か
-        let per_chart_offset_col = 11;
+        let insert_start_cell = (8, 5); // F8セルから挿入
+        let per_chart_offset = (8, 11); // グラフの配置間隔がセルで何個分か
         let yearly_ldf_wt_idx = yearly_ldf.clone().with_row_index("cell_row", Some(1));
 
-        for (i, monthly_data) in extract_monthly_frame_vec(yearly_ldf).iter().enumerate() {
+        for (i, monthly_data) in extract_monthly_frame_vec(&yearly_ldf_wt_idx)
+            .iter()
+            .enumerate()
+        {
             let jp_month_str = format!("{}月", monthly_data.month);
 
             // 月毎の体調トレンドのグラフ作成
-            let start_row = monthly_data
-                .ldf
-                .clone()
-                .collect()?
-                .to
+            let monthly_data_df = monthly_data.ldf.clone().collect()?;
+            let cell_rows = monthly_data_df.column("cell_row")?.u32()?;
 
-            let row = insert_row + (i / insert_matrix.1) * per_chart_offset_row;
-            let col = insert_col + (i % insert_matrix.1) * per_chart_offset_col;
-            worksheet.write_string(row, col, &jp_month_str)?;
+            let start_row = cell_rows.first().unwrap();
+            let end_row = cell_rows.last().unwrap();
+            let start_col = 0;
+
+            let trend_line_chart =
+                self._add_line_chart(&*worksheet.name(), start_row, start_col, end_row, 1);
+
+            let mut base_chart =
+                self._add_base_chart(&*worksheet.name(), start_row, start_col, end_row, 4);
+
+            // グラフの結合
+            base_chart.combine(&trend_line_chart);
+            // 書式調整
+            base_chart
+                .title()
+                .set_name(&jp_month_str)
+                .set_font(&ChartFont::new().set_size(14));
+            self._set_chart_format(&mut base_chart, monthly_data_df.height() as u32)?;
+
+            // グラフを挿入
+            let insert_row = insert_start_cell.0 + (i / insert_matrix.1 * per_chart_offset.0);
+            let insert_col = insert_start_cell.1 + (i % insert_matrix.1 * per_chart_offset.1);
+            worksheet.insert_chart(insert_row as u32, insert_col as u16, &base_chart)?;
         }
-
-        // for i, (monthly_date, monthly_df) in enumerate(
-        //     self._iter_yearly_data(yearly_df_wt_idx, "1mo"),
-        // ):
-        //     jp_month_str = f"{monthly_date.month}月"
-
-        //     # 月毎の体調の推移をグラフ化
-        //     # データの参照範囲を取得
-        //     start_row = monthly_df[0, "cell_row"]
-        //     end_row = monthly_df[-1, "cell_row"]
-
-        //     trend_line_chart = self._add_line_chart(
-        //         sheet_name,
-        //         (start_row, 0),
-        //         (end_row, 0),
-        //         (start_row, 1),
-        //         (end_row, 1),
-        //     )
-
-        //     base_chart = self._add_base_chart(
-        //         sheet_name,
-        //         (start_row, 0),
-        //         (end_row, 0),
-        //         (start_row, 4),
-        //         (end_row, 4),
-        //     )
-
-        //     # グラフ結合
-        //     base_chart.combine(trend_line_chart)
-        //     # 書式調整
-        //     base_chart.set_title({"name": jp_month_str, "name_font": {"size": 14}})
-        //     self._set_chart_format(base_chart, monthly_df.height)
-
-        //     # グラフを挿入
-        //     insert_row = insert_cell[0] + (i // insert_matrix[1] * per_chart_offset[0])
-        //     insert_col = insert_cell[1] + (i % insert_matrix[1] * per_chart_offset[1])
-        //     worksheet: Worksheet = self.get_worksheet_by_name(sheet_name)
-        //     worksheet.insert_chart(
-        //         insert_row,
-        //         insert_col,
-        //         base_chart,
-        //         {"object_position": 3},
-        //     )
         Ok(())
     }
 
-    fn _add_line_chart(&self) -> Result<()> {
-        // chart = self.add_chart({"type": "line"})
-        // chart.add_series(
-        //     {
-        //         "name": [sheet_name, 1, 0],
-        //         "categories": [sheet_name, *category_start, *category_end],
-        //         "values": [sheet_name, *values_start, *values_end],
-        //         "line": {"color": "blue"},
-        //         "marker": {"type": "circle"},
-        //     },
-        // )
-        // return chart
-        Ok(())
+    fn _add_line_chart(
+        &self,
+        sheet_name: &str,
+        start_row: u32,
+        start_col: u16,
+        end_row: u32,
+        end_col: u16,
+    ) -> Chart {
+        let mut line_chart = Chart::new_line();
+
+        line_chart
+            .add_series()
+            .set_name((sheet_name, 0, end_col))
+            .set_categories((sheet_name, start_row, start_col, end_row, start_col))
+            .set_values((sheet_name, start_row, end_col, end_row, end_col))
+            .set_format(ChartFormat::new().set_line(ChartLine::new().set_color(Color::Blue)))
+            .set_marker(ChartMarker::new().set_type(ChartMarkerType::Circle));
+        line_chart
     }
 
-    fn _add_base_chart(&self) -> Result<()> {
-        // chart = self.add_chart({"type": "column"})
-        // chart.add_series(
-        //     {
-        //         "name": [sheet_name, 4, 0],
-        //         "categories": [sheet_name, *category_start, *category_end],
-        //         "values": [sheet_name, *values_start, *values_end],
-        //         "border": {"none": True},
-        //         "fill": {"color": "#FBE5D6"},
-        //         "gap": 10,
-        //     },
-        // )
-        // return chart
-        Ok(())
+    fn _add_base_chart(
+        &self,
+        sheet_name: &str,
+        start_row: u32,
+        start_col: u16,
+        end_row: u32,
+        end_col: u16,
+    ) -> Chart {
+        let mut col_chart = Chart::new_column();
+
+        col_chart
+            .add_series()
+            .set_name((sheet_name, 0, end_col))
+            .set_categories((sheet_name, start_row, start_col, end_row, start_col))
+            .set_values((sheet_name, start_row, end_col, end_row, end_col))
+            .set_format(
+                ChartFormat::new()
+                    .set_no_border()
+                    .set_solid_fill(ChartSolidFill::new().set_color("#FBE5D6")),
+            )
+            .set_gap(10);
+        col_chart
     }
 
-    fn _set_chart_format(&self) -> Result<()> {
-        // chart.set_size({"width": 620, "height": 155})
-        // chart.set_legend({"none": True})
-        // chart.set_x_axis(
-        //     {
-        //         "date_axis": True,
-        //         "major_unit_type": "days",
-        //         "major_unit": 1,
-        //         "num_format": "m/d",
-        //         "major_gridlines": {
-        //             "visible": True,
-        //             "line": {"color": "#D0D0D0"},
-        //         },
-        //         "position_axis": "on_tick",
-        //     },
-        // )
-        // chart.set_y_axis(
-        //     {
-        //         "min": 1,
-        //         "max": 5,
-        //         "major_unit": 1,
-        //         "num_font": {"size": 11},
-        //         "major_gridlines": {
-        //             "visible": True,
-        //             "line": {"color": "#D0D0D0"},
-        //         },
-        //     },
-        // )
-        // chart.set_plotarea(
-        //     {
-        //         "layout": {
-        //             "x": 0.05,
-        //             "y": 0.20,
-        //             "width": 0.9 * date_cnt / 31,
-        //             "height": 0.5,
-        //         },
-        //     },
-        // )
+    fn _set_chart_format(&self, chart: &mut Chart, date_cnt: u32) -> Result<()> {
+        chart.set_width(620);
+        chart.set_height(155);
+
+        chart.legend().set_hidden();
+        chart
+            .x_axis()
+            .set_date_axis(true)
+            .set_major_unit_date_type(rust_xlsxwriter::chart::ChartAxisDateUnitType::Days)
+            .set_major_unit(1)
+            .set_num_format("m/d")
+            .set_major_gridlines(true)
+            .set_major_gridlines_line(&ChartLine::new().set_color("#D0D0D0"))
+            .set_position_between_ticks(false);
+        chart
+            .y_axis()
+            .set_min(1)
+            .set_max(5)
+            .set_major_unit(1)
+            .set_font(&ChartFont::new().set_size(11))
+            .set_major_gridlines(true)
+            .set_major_gridlines_line(&ChartLine::new().set_color("#D0D0D0"));
+        chart.plot_area().set_layout(
+            &ChartLayout::new()
+                .set_offset(0.05, 0.20)
+                .set_dimensions(0.9 * date_cnt as f64 / 31.0, 0.50),
+        );
         Ok(())
     }
 }
@@ -455,8 +436,8 @@ fn read_excel(path: &str) -> Result<DataFrame> {
             Some(value) => Some(value),
             None => None,
         };
-        let condition = match calamine::DataType::as_i32(&row[1]) {
-            Some(value) => Some(value),
+        let condition = match calamine::DataType::as_i64(&row[1]) {
+            Some(value) => Some(value as i32),
             None => None,
         };
         let comment = match calamine::DataType::as_string(&row[2]) {
@@ -503,6 +484,7 @@ pub fn run() {
 mod tests {
     use super::*;
     use chrono::NaiveDate;
+    use rust_xlsxwriter::{ExcelDateTime, Format};
     // use rust_xlsxwriter::*;
     use std::fs::File;
     use std::io::{BufWriter, Write};
