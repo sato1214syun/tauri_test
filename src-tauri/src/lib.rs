@@ -42,7 +42,6 @@ impl ConditionWorkbook {
     fn write(&mut self, ldf: &LazyFrame, path: &Path) -> Result<()> {
         self._write_raw_data(ldf, "data")?;
         self._write_yearly_data(ldf)?;
-        println!("path: {:?}", path);
         self.workbook.save(path)?;
         Ok(())
     }
@@ -60,12 +59,16 @@ impl ConditionWorkbook {
         let comp_sheet_name = "年間体調比較";
         self.workbook.add_worksheet().set_name(comp_sheet_name)?;
 
+        // 集計表用の書式を設定
+        let annual_data_format = ConditionalFormatDataBar::new().set_fill_color(Color::Orange);
+        let monthly_data_format = ConditionalFormatDataBar::new().set_fill_color(Color::Green);
+
         let mut row = 0;
         let col = 0;
         // Create a new Excel writer.
         for yearly_data in extract_yearly_frame_vec(ldf) {
             let sheet_name = yearly_data.year.to_string();
-            let worksheet = &mut Worksheet::new();
+            let mut worksheet = Worksheet::new();
             worksheet.set_name(&sheet_name)?;
             // この年のシートにデータを書き込み
             let yearly_ldf = prepare_yearly_frame(&yearly_data.ldf, yearly_data.year);
@@ -74,32 +77,32 @@ impl ConditionWorkbook {
                 Err(e) => return Err(e.into()),
             };
             self.writer
-                .write_dataframe_to_worksheet(&yearly_df, worksheet, 0, 0)?;
+                .write_dataframe_to_worksheet(&yearly_df, &mut worksheet, 0, 0)?;
 
-            let yearly_agg_ldf = prepare_agg_frame(&yearly_ldf);
+            let yearly_agg_df = prepare_agg_frame(&yearly_ldf).collect()?;
             self.writer
-                .write_dataframe_to_worksheet(&yearly_agg_ldf.collect()?, worksheet, 0, 6)?;
-            // 集計表に書式を設定
-            let annual_data_format = ConditionalFormatDataBar::new().set_fill_color(Color::Orange);
-            let monthly_data_format = ConditionalFormatDataBar::new().set_fill_color(Color::Green);
+                .write_dataframe_to_worksheet(&yearly_agg_df, &mut worksheet, 0, 6)?;
+
+            // 集計表に条件付き書式を設定
             worksheet.add_conditional_format(1, 8, 6, 8, &annual_data_format)?;
             worksheet.add_conditional_format(1, 9, 6, 20, &monthly_data_format)?;
 
             // 年毎体調比較シートに集計データを書き込み
-            self.workbook
-                .worksheet_from_name(comp_sheet_name)?
-                .write_string(row, col, &sheet_name)?;
+            let workbook_comp = self.workbook.worksheet_from_name(comp_sheet_name)?;
+            workbook_comp.write_string(row, col, &sheet_name)?;
             row += 1;
-            self.writer.write_dataframe_to_worksheet(
-                &yearly_df,
-                self.workbook.worksheet_from_name(comp_sheet_name)?,
-                row,
-                col,
-            )?;
-            row += yearly_df.height() as u32;
+            self.writer
+                .write_dataframe_to_worksheet(&yearly_agg_df, workbook_comp, row, col)?;
+            let end_row = row + yearly_agg_df.height() as u32;
+            // 集計表に条件付き書式を設定
+            workbook_comp.add_conditional_format(row + 1, 2, end_row, 2, &annual_data_format)?;
+            workbook_comp.add_conditional_format(row + 1, 3, end_row, 13, &monthly_data_format)?;
+            row = end_row + 1;
 
             // この年のシートに月毎の体調推移グラフを挿入
-            self._insert_monthly_trend_chart(worksheet, &yearly_ldf)?;
+            self._insert_monthly_trend_chart(&mut worksheet, &yearly_ldf)?;
+            // workbookにworksheetを追加
+            self.workbook.push_worksheet(worksheet);
         }
         Ok(())
     }
@@ -246,13 +249,14 @@ fn extract_yearly_frame_vec(ldf: &LazyFrame) -> Vec<YearlyData> {
 
     let mut yearly_data = vec![];
     for year in years {
-        let yearly_df = df_with_year
+        let yearly_ldf = df_with_year
             .clone()
-            .filter(col("year").eq(lit(year.unwrap_or_default())));
+            .filter(col("year").eq(lit(year.unwrap_or_default())))
+            .drop([col("year")]);
 
         yearly_data.push(YearlyData {
             year: year.unwrap_or_default(),
-            ldf: yearly_df,
+            ldf: yearly_ldf,
         });
     }
     yearly_data
