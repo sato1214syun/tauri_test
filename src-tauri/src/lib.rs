@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use calamine::{open_workbook, Reader, Xlsx};
@@ -14,8 +14,8 @@ use rust_xlsxwriter::{
     worksheet::Worksheet,
     Color, Workbook,
 };
-// use serde::{Deserialize, Serialize};
-// use tauri::{Emitter, Listener, Manager};
+use serde::{Deserialize, Serialize};
+use tauri::{Emitter, Listener, Manager};
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
 struct YearlyData {
@@ -39,9 +39,10 @@ impl ConditionWorkbook {
         Self { workbook, writer }
     }
 
-    fn write(&mut self, ldf: &LazyFrame, path: &str) -> Result<()> {
+    fn write(&mut self, ldf: &LazyFrame, path: &Path) -> Result<()> {
         self._write_raw_data(ldf, "data")?;
         self._write_yearly_data(ldf)?;
+        println!("path: {:?}", path);
         self.workbook.save(path)?;
         Ok(())
     }
@@ -374,7 +375,7 @@ fn prepare_agg_frame(yearly_ldf: &LazyFrame) -> LazyFrame {
 }
 
 #[tauri::command]
-fn write_excel(csv_path_str: &str, ori_excel_path_str: &str, save_path: &str) -> String {
+fn write_excel(csv_path_str: &str, ori_excel_path_str: &str, save_path: &Path) -> String {
     let additional_condition_df = match read_csv(Some(csv_path_str.into())) {
         Ok(df) => df,
         Err(e) => return e.to_string(),
@@ -625,8 +626,9 @@ mod tests {
         .unwrap();
 
         let mut wb = ConditionWorkbook::new();
-        match wb.write(&test_df.lazy(), "test_data\\test.xlsx") {
-            Ok(_) => assert!(std::path::Path::new("test_data\\test.xlsx").exists()),
+        let path = std::path::Path::new("test.xlsx");
+        match wb.write(&test_df.lazy(), path) {
+            Ok(_) => assert!(path.exists()),
             Err(e) => panic!("Failed to write Excel file: {}", e),
         }
     }
