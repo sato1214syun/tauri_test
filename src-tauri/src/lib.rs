@@ -42,7 +42,7 @@ impl ConditionWorkbook {
     fn write(&mut self, ldf: &LazyFrame, path: &str) -> Result<()> {
         self._write_raw_data(ldf, "data")?;
         self._write_yearly_data(ldf)?;
-        self.writer.save(path)?;
+        self.workbook.save(path)?;
         Ok(())
     }
 
@@ -56,7 +56,8 @@ impl ConditionWorkbook {
 
     fn _write_yearly_data(&mut self, ldf: &LazyFrame) -> Result<()> {
         // # 年間の体調集計データの比較シートを作成
-        let worksheet_comp = self.workbook.add_worksheet().set_name("年間体調比較")?;
+        let comp_sheet_name = "年間体調比較";
+        self.workbook.add_worksheet().set_name(comp_sheet_name)?;
 
         let mut row = 0;
         let col = 0;
@@ -67,13 +68,16 @@ impl ConditionWorkbook {
             worksheet.set_name(&sheet_name)?;
             // この年のシートにデータを書き込み
             let yearly_ldf = prepare_yearly_frame(&yearly_data.ldf, yearly_data.year);
-            let yearly_df = yearly_ldf.clone().collect()?;
+            let yearly_df = match yearly_ldf.clone().collect() {
+                Ok(df) => df,
+                Err(e) => return Err(e.into()),
+            };
             self.writer
-                .write_dataframe_to_worksheet(&yearly_df, worksheet, 0, 0);
+                .write_dataframe_to_worksheet(&yearly_df, worksheet, 0, 0)?;
 
-            let yearly_agg_df = prepare_agg_frame(&yearly_ldf).collect()?;
+            let yearly_agg_ldf = prepare_agg_frame(&yearly_ldf);
             self.writer
-                .write_dataframe_to_worksheet(&yearly_agg_df, worksheet, 0, 6);
+                .write_dataframe_to_worksheet(&yearly_agg_ldf.collect()?, worksheet, 0, 6)?;
             // 集計表に書式を設定
             let annual_data_format = ConditionalFormatDataBar::new().set_fill_color(Color::Orange);
             let monthly_data_format = ConditionalFormatDataBar::new().set_fill_color(Color::Green);
@@ -81,10 +85,16 @@ impl ConditionWorkbook {
             worksheet.add_conditional_format(1, 9, 6, 20, &monthly_data_format)?;
 
             // 年毎体調比較シートに集計データを書き込み
-            worksheet_comp.write_string(row, col, &sheet_name)?;
+            self.workbook
+                .worksheet_from_name(comp_sheet_name)?
+                .write_string(row, col, &sheet_name)?;
             row += 1;
-            self.writer
-                .write_dataframe_to_worksheet(&yearly_df, worksheet_comp, row, col)?;
+            self.writer.write_dataframe_to_worksheet(
+                &yearly_df,
+                self.workbook.worksheet_from_name(comp_sheet_name)?,
+                row,
+                col,
+            )?;
             row += yearly_df.height() as u32;
 
             // この年のシートに月毎の体調推移グラフを挿入
@@ -301,19 +311,19 @@ fn prepare_yearly_frame(ldf: &LazyFrame, year: i32) -> LazyFrame {
 
     yearly_ldf = yearly_ldf.left_join(ldf.clone(), col("日付"), col("日付"));
     // 曜日を追加
-    let weekdays_int = lit(vec![1, 2, 3, 4, 5, 6, 7]);
-    let weekdays_str = lit(Series::new(
-        "weekdays".into(),
-        &["月", "火", "水", "木", "金", "土", "日"],
-    ));
-    let holidays_int = lit(vec![0, 0, 0, 0, 0, 5, 5]);
-    yearly_ldf.with_columns(vec![
+    let weekdays_int_series: Series = [1, 2, 3, 4, 5, 6, 7].iter().collect();
+    let weekdays_str_series: Series = ["月", "火", "水", "木", "金", "土", "日"]
+        .iter()
+        .map(|&s| s)
+        .collect();
+    let holidays_int_series: Series = [0, 0, 0, 0, 0, 5, 5].iter().collect();
+    yearly_ldf = yearly_ldf.with_columns(vec![
         col("日付")
             .dt()
             .weekday()
             .replace_strict(
-                weekdays_int.clone(),
-                weekdays_str,
+                lit(weekdays_int_series.clone()),
+                lit(weekdays_str_series),
                 None,
                 Some(DataType::String),
             )
@@ -321,39 +331,33 @@ fn prepare_yearly_frame(ldf: &LazyFrame, year: i32) -> LazyFrame {
         col("日付")
             .dt()
             .weekday()
-            .replace_strict(weekdays_int, holidays_int, None, Some(DataType::Int32))
+            .replace_strict(
+                lit(weekdays_int_series),
+                lit(holidays_int_series),
+                None,
+                Some(DataType::Int32),
+            )
             .alias("土日判定"),
-    ])
+    ]);
+    yearly_ldf
 }
 
 fn prepare_agg_frame(yearly_ldf: &LazyFrame) -> LazyFrame {
     // # 年間の体調の集計dfを作成
-    let mut agg_ldf = DataFrame::new(vec![
-        Column::new("調子".into(), vec!["↑", "↗", "→", "↘", "↓", "⇓"]),
-        Column::new("体調".into(), vec![5, 4, 3, 2, 1, 0]),
-    ])
+    let mut agg_ldf = df!(
+        "調子" => ["↑", "↗", "→", "↘", "↓", "⇓"],
+        "体調" => [5, 4, 3, 2, 1, 0]
+    )
     .unwrap()
     .lazy();
 
-    agg_ldf = agg_ldf.left_join(
-        yearly_ldf
-            .clone()
-            .group_by([col("体調")])
-            .agg([col("年間").count()])
-            .cast(
-                {
-                    col("年間");
-                    {
-                        let mut map = PlHashMap::new();
-                        map.insert("年間", DataType::Int32);
-                        map
-                    }
-                },
-                true,
-            ),
-        col("体調"),
-        col("体調"),
-    );
+    let yearly_agg_ldf = yearly_ldf
+        .clone()
+        .group_by([col("体調")])
+        .agg([col("日付").count().alias("年間")])
+        .select([col("体調"), col("年間")]);
+
+    agg_ldf = agg_ldf.left_join(yearly_agg_ldf, col("体調"), col("体調"));
 
     // 月毎の集計を追加
     for monthly_data in extract_monthly_frame_vec(yearly_ldf) {
@@ -363,17 +367,7 @@ fn prepare_agg_frame(yearly_ldf: &LazyFrame) -> LazyFrame {
             .ldf
             .group_by([col("体調")])
             .agg([col("体調").count().alias(&jp_month_str)])
-            .cast(
-                {
-                    col(&jp_month_str);
-                    {
-                        let mut map = PlHashMap::new();
-                        map.insert(jp_month_str.as_str(), DataType::Int32);
-                        map
-                    }
-                },
-                true,
-            );
+            .select([col("体調"), col(&jp_month_str)]);
         agg_ldf = agg_ldf.left_join(temp_agg_ldf, col("体調"), col("体調"));
     }
     agg_ldf.fill_null(lit(0))
@@ -590,7 +584,7 @@ mod tests {
         let excel_df = df!(
             "日付" => [NaiveDate::from_ymd_opt(2025, 01, 25).unwrap(), NaiveDate::from_ymd_opt(2025, 01, 26).unwrap()],
             "体調" => [None, Some(2i32)],
-            "コメント" => [None, Some("Test comment")]
+            "コメント" => [None, Some("テストコメント")]
         )
         .unwrap();
 
@@ -603,10 +597,12 @@ mod tests {
 
             ],
             "体調" => [None, Some(2i32), None, Some(4i32)],
-            "コメント" => [None, Some("Test comment"), None, Some("Test comment")]
+            "コメント" => [None, Some("テストコメント"), None, Some("Test comment")]
         )
         .unwrap();
         let ldf = merge_condition_data(&csv_df, &excel_df);
+        print!("ldf: {:?}", ldf.clone().collect().unwrap());
+        println!("expected_df: {:?}", expected_df);
         assert!(ldf.collect().unwrap().equals_missing(&expected_df));
     }
 
@@ -629,7 +625,9 @@ mod tests {
         .unwrap();
 
         let mut wb = ConditionWorkbook::new();
-        wb.write(&test_df.lazy(), "./test_data/test.xlsx").unwrap();
-        assert!(std::path::Path::new("./test_data/test.xlsx").exists());
+        match wb.write(&test_df.lazy(), "test_data\\test.xlsx") {
+            Ok(_) => assert!(std::path::Path::new("test_data\\test.xlsx").exists()),
+            Err(e) => panic!("Failed to write Excel file: {}", e),
+        }
     }
 }
