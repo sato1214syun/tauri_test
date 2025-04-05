@@ -1,6 +1,6 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow;
 use calamine::{open_workbook, Reader, Xlsx};
 use chrono::NaiveDate;
 use polars::prelude::*;
@@ -14,8 +14,6 @@ use rust_xlsxwriter::{
     worksheet::Worksheet,
     Color, Workbook,
 };
-use serde::{Deserialize, Serialize};
-use tauri::{Emitter, Listener, Manager};
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
 struct YearlyData {
@@ -39,14 +37,18 @@ impl ConditionWorkbook {
         Self { workbook, writer }
     }
 
-    fn write(&mut self, ldf: &LazyFrame, path: &Path) -> Result<()> {
-        self._write_raw_data(ldf, "data")?;
-        self._write_yearly_data(ldf)?;
-        self.workbook.save(path)?;
-        Ok(())
+    fn write(&mut self, ldf: &LazyFrame, path: &str) -> anyhow::Result<()> {
+        match self._write_raw_data(ldf, "data") {
+            Ok(_) => self._write_yearly_data(ldf)?,
+            Err(e) => return Err(e),
+        }
+        match self.workbook.save(path) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e.into()),
+        }
     }
 
-    fn _write_raw_data(&mut self, ldf: &LazyFrame, sheet_name: &str) -> Result<()> {
+    fn _write_raw_data(&mut self, ldf: &LazyFrame, sheet_name: &str) -> anyhow::Result<()> {
         let worksheet = self.workbook.add_worksheet().set_name(sheet_name)?;
 
         self.writer
@@ -54,7 +56,7 @@ impl ConditionWorkbook {
         Ok(())
     }
 
-    fn _write_yearly_data(&mut self, ldf: &LazyFrame) -> Result<()> {
+    fn _write_yearly_data(&mut self, ldf: &LazyFrame) -> anyhow::Result<()> {
         // # 年間の体調集計データの比較シートを作成
         let comp_sheet_name = "年間体調比較";
         self.workbook.add_worksheet().set_name(comp_sheet_name)?;
@@ -84,8 +86,8 @@ impl ConditionWorkbook {
                 .write_dataframe_to_worksheet(&yearly_agg_df, &mut worksheet, 0, 6)?;
 
             // 集計表に条件付き書式を設定
-            worksheet.add_conditional_format(1, 8, 6, 8, &annual_data_format)?;
-            worksheet.add_conditional_format(1, 9, 6, 20, &monthly_data_format)?;
+            worksheet.add_conditional_format(1, 8, 6, 8, &annual_data_format.clone())?;
+            worksheet.add_conditional_format(1, 9, 6, 20, &monthly_data_format.clone())?;
 
             // 年毎体調比較シートに集計データを書き込み
             let workbook_comp = self.workbook.worksheet_from_name(comp_sheet_name)?;
@@ -96,7 +98,7 @@ impl ConditionWorkbook {
             let end_row = row + yearly_agg_df.height() as u32;
             // 集計表に条件付き書式を設定
             workbook_comp.add_conditional_format(row + 1, 2, end_row, 2, &annual_data_format)?;
-            workbook_comp.add_conditional_format(row + 1, 3, end_row, 13, &monthly_data_format)?;
+            workbook_comp.add_conditional_format(row + 1, 3, end_row, 14, &monthly_data_format)?;
             row = end_row + 1;
 
             // この年のシートに月毎の体調推移グラフを挿入
@@ -111,7 +113,7 @@ impl ConditionWorkbook {
         &self,
         worksheet: &mut Worksheet,
         yearly_ldf: &LazyFrame,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         // 体調の推移グラフ挿入
 
         let insert_matrix = (6, 2); // 6行2列に並べる
@@ -200,7 +202,7 @@ impl ConditionWorkbook {
         col_chart
     }
 
-    fn _set_chart_format(&self, chart: &mut Chart, date_cnt: u32) -> Result<()> {
+    fn _set_chart_format(&self, chart: &mut Chart, date_cnt: u32) -> anyhow::Result<()> {
         chart.set_width(620);
         chart.set_height(155);
 
@@ -379,25 +381,27 @@ fn prepare_agg_frame(yearly_ldf: &LazyFrame) -> LazyFrame {
 }
 
 #[tauri::command]
-fn write_excel(csv_path_str: &str, ori_excel_path_str: &str, save_path: &Path) -> String {
-    let additional_condition_df = match read_csv(Some(csv_path_str.into())) {
+fn write_excel(csv_path: &str, excel_path: &str, save_path: &str) -> Result<(), String> {
+    let additional_condition_df = match read_csv(Some(csv_path.into())) {
         Ok(df) => df,
-        Err(e) => return e.to_string(),
+        Err(e) => return Err(e.to_string()),
     };
-    let ori_condition_df = match read_excel(ori_excel_path_str) {
+    let ori_condition_df = match read_excel(excel_path) {
         Ok(df) => df,
-        Err(e) => return e.to_string(),
+        Err(e) => return Err(e.to_string()),
     };
     let merged_ldf = merge_condition_data(&additional_condition_df, &ori_condition_df);
     let mut workbook = ConditionWorkbook::new();
-    workbook.write(&merged_ldf, save_path).unwrap();
-    "Excelファイルが保存されました".to_string()
+    match workbook.write(&merged_ldf, save_path) {
+        Ok(_) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 fn read_csv(path: Option<PathBuf>) -> PolarsResult<DataFrame> {
     let schema = Schema::from_iter(vec![
         Field::new("日付".into(), DataType::Date),
-        Field::new("体調".into(), DataType::Int64),
+        Field::new("体調".into(), DataType::Int32),
         Field::new("コメント".into(), DataType::String),
     ]);
     match CsvReadOptions::default()
@@ -419,7 +423,7 @@ fn read_csv(path: Option<PathBuf>) -> PolarsResult<DataFrame> {
     }
 }
 
-fn read_excel(path: &str) -> Result<DataFrame> {
+fn read_excel(path: &str) -> anyhow::Result<DataFrame> {
     let mut excel: Xlsx<_> = open_workbook(path).unwrap();
 
     let range = match excel.worksheet_range("data") {
@@ -630,9 +634,21 @@ mod tests {
         .unwrap();
 
         let mut wb = ConditionWorkbook::new();
-        let path = std::path::Path::new("test.xlsx");
+        // パスの指定は、src-tauriディレクトリに対して相対パスで指定する必要がある
+        // 例えば、root/src-tauri/src/lib.rsからroot/testのファイルを指定する場合は、../testのように指定する
+        let path = "../test_data/test.xlsx";
         match wb.write(&test_df.lazy(), path) {
-            Ok(_) => assert!(path.exists()),
+            Ok(_) => assert!(true),
+            Err(e) => panic!("Failed to write Excel file: {}", e),
+        }
+    }
+    #[test]
+    fn test_write_excel_with_csv() {
+        let csv_path = "../test_data/RhythmCareData.csv";
+        let excel_path = "../test_data/体調記録_Sean_20250331.xlsx";
+        let save_path = "../test_data/test.xlsx";
+        match write_excel(csv_path, excel_path, save_path) {
+            Ok(_) => assert!(true),
             Err(e) => panic!("Failed to write Excel file: {}", e),
         }
     }
