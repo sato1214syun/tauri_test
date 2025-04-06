@@ -46,5 +46,21 @@
 	<false/>
 	<key>UIFileSharingEnabled</key>
 	<false/>
+	<key>NSFileProviderDomainUsageDescription</key>
+	<string>test access to a file provide domain usage description</string>
+	<key>NSAppBundlesUsageDescription</key>
+	<string>app management usage description</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>desktop folder usage description</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>document folder usage description</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>downloads folder usage description</string>
+	<key>NSFileProviderPresenceUsageDescription</key>
+	<string>file provider presemce folder usage description</string>
+	<key>NSFSKitBlockDeviceUsageDescription</key>
+	<string>FSKit block device usage description</string>
+	<key>NSAppDataUsageDescription</key>
+	<string>other application usage description</string>
 </dict>
 </plist>
