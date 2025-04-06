@@ -14,14 +14,14 @@ function App() {
 			filter = [
 				{
 					name: "CSV file",
-					extensions: ["csv"],
+					extensions: ["csv", "text/csv"],
 				},
 			];
 		} else if (file_type === "excel") {
 			filter = [
 				{
 					name: "Excel file",
-					extensions: ["xlsx"],
+					extensions: ["xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
 				},
 			];
 		} else {
