@@ -84,7 +84,7 @@ function App() {
 					<button type="button" onClick={() => open_dialog("csv")}>
 						Upload CSV
 					</button>
-					<p>Selected CSV file: {csv_path}</p>
+					<p>Selected CSV file: {csv_path.split("/").pop()}</p>
 				</div>
 
 				<div>
@@ -92,7 +92,7 @@ function App() {
 					<button type="button" onClick={() => open_dialog("excel")}>
 						Upload Excel
 					</button>
-					<p>Selected Excel file: {excel_path}</p>
+					<p>Selected Excel file: {excel_path.split("/").pop()}</p>
 				</div>
 
 				<div>

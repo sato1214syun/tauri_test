@@ -833,12 +833,21 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@tauri-apps/plugin-dialog@npm:~2":
-  version: 2.2.0
-  resolution: "@tauri-apps/plugin-dialog@npm:2.2.0"
+"@tauri-apps/plugin-dialog@npm:^2":
+  version: 2.2.1
+  resolution: "@tauri-apps/plugin-dialog@npm:2.2.1"
   dependencies:
     "@tauri-apps/api": "npm:^2.0.0"
-  checksum: 10c0/18d10013cc207dc5cf1b0513b7585fd6aa1a1a133dbb8e048e1d27ef7251ac770dfa2c9d5c400e4b87b9823c3c7155bc6a279a577e494504361a30383c4e1f17
+  checksum: 10c0/d52db0f1665cc2f437e51af3de9b85674a3d106403725253076fb6945b224046f4ea91e8a78d29a765ff2ef79e35fc46716de0b7ebecda83459ce597ece00371
+  languageName: node
+  linkType: hard
+
+"@tauri-apps/plugin-fs@npm:^2.2.1":
+  version: 2.2.1
+  resolution: "@tauri-apps/plugin-fs@npm:2.2.1"
+  dependencies:
+    "@tauri-apps/api": "npm:^2.0.0"
+  checksum: 10c0/7b2d572bbc3b3c568e751b5ba4cc75b6a7937ed35a14d958c5bb69dfe4d3e4ad8a0c4d72a90ce6c043af180a8ff7c0623050fc8d540a16a45d465d3a0e6d4308
   languageName: node
   linkType: hard
 
@@ -2001,7 +2010,8 @@ __metadata:
     "@biomejs/biome": "npm:1.9.4"
     "@tauri-apps/api": "npm:^2"
     "@tauri-apps/cli": "npm:^2"
-    "@tauri-apps/plugin-dialog": "npm:~2"
+    "@tauri-apps/plugin-dialog": "npm:^2"
+    "@tauri-apps/plugin-fs": "npm:^2.2.1"
     "@tauri-apps/plugin-opener": "npm:^2"
     "@types/react": "npm:^18.3.1"
     "@types/react-dom": "npm:^18.3.1"
