@@ -48,6 +48,7 @@ function App() {
 
 	async function save_excel() {
 		const save_path = await save({
+			defaultPath: "体調管理.xlsx",
 			filters: [
 				{
 					name: "Excel file",
