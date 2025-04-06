@@ -8,6 +8,16 @@
   "permissions": [
     "core:default",
     "opener:default",
-    "dialog:default"
+    "dialog:default",
+    "fs:allow-open",
+    "fs:allow-write",
+    "fs:allow-read",
+    "fs:allow-rename",
+    "fs:write-all",
+    "fs:write-files",
+    "fs:read-all",
+    "fs:read-files",
+    "fs:allow-mkdir",
+    "fs:allow-remove"
   ]
 }
