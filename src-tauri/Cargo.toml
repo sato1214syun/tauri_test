@@ -3,7 +3,7 @@ name = "tauri_test"
 version = "0.1.0"
 description = "A Tauri App"
 authors = ["you"]
-edition = "2021"
+edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -15,7 +15,7 @@ name = "tauri_test_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2.2.0", features = [] }
 
 [dependencies]
 tauri = { version = "^2", features = ["protocol-asset"] }
@@ -24,11 +24,13 @@ tauri-plugin-dialog = "^2"
 tauri-plugin-fs = "^2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-polars = { version = "0.46.0", features = ["polars-io", "replace"] }
-polars_excel_writer = "0.13.0"
-calamine = { version = "0.26.1", features = ["dates"] }
-anyhow = "1.0.97"
+polars = { version = "0.46.0", features = ["polars-io", "replace", "lazy"] }
+polars_excel_writer = "0.14.0"
+calamine = { git = "https://github.com/prophittcorey/calamine", branch = "fix/zip-3.0", features = [
+    "dates",
+] }
+anyhow = "1.0.98"
 rust_xlsxwriter = "0.84.0"
-tempfile = "3.19.1"
-chrono = "0.4.40"
-zip = "~2.5.0"
+tempfile = "3.20.0"
+chrono = "0.4.41"
+zip = "4.0.0"
